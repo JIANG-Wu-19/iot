@@ -1,0 +1,73 @@
+# Prerequisites
+*.d
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+*.bin
+bin
+30_data/
+20_mqtt_thingsboard/
+01_blink/
+02_imu/
+11_nimble_server_custom/
+apps/
+10_tingml_datasets/*
+*.tflite
+*.h5
+*.npy
+04_experiment_answer/
+04_*/
+13_experiment_answer/
+22_experiment_answer/
+22_experiment_answer/
+32_experiment_answer/
+answer.zip
+
+*.past.md

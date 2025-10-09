@@ -1,0 +1,9 @@
+numpy~=1.19.2
+matplotlib~=3.6.0
+tensorflow==2.6.0
+scikit-learn
+protobuf==3.19.6
+testresources
+keras==2.6.0
+pyserial
+jupyter

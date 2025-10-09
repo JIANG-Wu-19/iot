@@ -1,0 +1,62 @@
+#!/bin/bash
+### BEGIN INIT INFO
+# Provides:          thingsboard
+# Required-Start:    $remote_fs$syslog
+# Required-Stop:     $remote_fs$syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Start/stop thingsboard server
+# Description:       Start/stop/restart the thingsboard server
+### END INIT INFO
+
+# Source function library.
+. /lib/lsb/init-functions
+
+NAME=thingsboard
+DESC="thingsboard server"
+PIDFILE=/var/run/thingsboard.pid
+JARFILE=/usr/share/thingsboard/bin/thingsboard.jar
+USER=thingsboard
+start() {
+    echo -n "Starting $DESC: "
+    start-stop-daemon --start --quiet --pidfile $PIDFILE --chuid $USER --background --make-pidfile --exec $JARFILE
+    RETVAL=$?
+    echo "$NAME."
+    return $RETVAL
+}
+
+stop() {
+    echo -n "Stopping $DESC: "
+    start-stop-daemon --stop --quiet --pidfile $PIDFILE --retry=TERM/30/KILL/5
+    RETVAL=$?
+    echo "$NAME."
+    [ $RETVAL = 0 ] && rm -f$PIDFILE
+    return $RETVAL
+}
+
+restart() {
+    stop
+    start
+}
+
+case "$1" in
+    start)
+        start
+        ;;
+    stop)
+        stop
+        ;;
+    restart)
+        restart
+        ;;
+    status)
+        status_of_proc -p $PIDFILE java$DESC && exit 0 || exit $?
+        ;;
+    *)
+        echo "Usage: $0 {start|stop|restart|status}"
+        exit 1
+        ;;
+esac
+
+exit $?
+
