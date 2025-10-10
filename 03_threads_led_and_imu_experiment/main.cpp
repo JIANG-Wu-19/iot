@@ -26,20 +26,23 @@ static kernel_pid_t _led_pid;
 #define LED_MSG_TYPE_RED     (0x3111)
 #define LED_MSG_TYPE_GREEN   (0x3112)
 #define LED_MSG_TYPE_BLUE    (0x3113)
+#define LED_MSG_TYPE_YELLOW  (0x3114)
+#define LED_MSG_TYPE_PURPLE  (0x3115)
+#define LED_MSG_TYPE_CYAN    (0x3116)
 #define LED_GPIO_R GPIO26
 #define LED_GPIO_G GPIO25
 #define LED_GPIO_B GPIO27
 
-#define ACC_THR 0.27
-#define GYRO_THR 30.0
-#define TILT_THR 0.98 // cos(45°) = 0.707
+#define ACC_THR 0.275
+#define GYRO_THR 33.0
+#define TILT_THR 0.985 // cos(45°) = 0.707
 
 struct MPU6050Data
 {
     float ax, ay, az;
     float gx, gy, gz;
 };
-enum MoveState{Stationary, Tilted, Rotating, Moving};
+enum MoveState{Stationary, Tilted, Rotating, Moving, MovingX, MovingY, MovingZ};
 
 void delay_ms(uint32_t sleep_ms)
 {
@@ -90,6 +93,29 @@ void *_led_thread(void *arg)
             led.change_led_color(4);
             printf("[LED_THREAD]: LED BLUE!!\n");
         }
+        else if (msg.type == LED_MSG_TYPE_YELLOW)
+        {
+            // TURN ON YELLOW LIGHT
+            led.change_led_color(3);
+            printf("[LED_THREAD]: LED YELLOW!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_PURPLE)
+        {
+            // TURN ON PURPLE LIGHT
+            led.change_led_color(5);
+            printf("[LED_THREAD]: LED PURPLE!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_CYAN)
+        {
+            // TURN ON CYAN LIGHT
+            led.change_led_color(6);
+            printf("[LED_THREAD]: LED CYAN!!\n");
+        }
+        else
+        {
+            // UNKNOWN MESSAGE
+            printf("[LED_THREAD]: UNKNOWN MESSAGE!!\n");
+        }
     }
     return NULL;
 }
@@ -115,6 +141,14 @@ MoveState detectMovement(MPU6050Data &data)
     if (gyro_magnitude > GYRO_THR) {
         return Rotating;
     } else if (std::abs(acc_magnitude - g_acc) > ACC_THR) {
+        // if (az / g_acc > 1.1 || az / g_acc < 0.9) {
+        //     return MovingZ;
+        // } else if (std::abs(ax) > std::abs(ay)) {
+        //     return MovingX;
+        // } else {
+        //     return MovingY;
+        // }
+
         return Moving;
     } else if (std::abs(az) / acc_magnitude < TILT_THR) { // cos(45°) = 0.707
         return Tilted;
@@ -202,12 +236,12 @@ void *_imu_thread(void *arg)
         delay_ms(100);    
         MPU6050Data data;
         // Convert raw sensor data to real values
-        data.ax = (ax - 2079.71) / accel_fs_convert;
-        data.ay = (ay + 1057.19) / accel_fs_convert;
+        data.ax = (ax - 1015.21) / accel_fs_convert;
+        data.ay = (ay + 514.53) / accel_fs_convert;
         data.az = az / accel_fs_convert;
-        data.gx = (gx + 97.54) / gyro_fs_convert;
-        data.gy = (gy - 16.09) / gyro_fs_convert;
-        data.gz = (gz - 36.77) / gyro_fs_convert;
+        data.gx = (gx + 95.99) / gyro_fs_convert;
+        data.gy = (gy - 14.77) / gyro_fs_convert;
+        data.gz = (gz - 35.53) / gyro_fs_convert;
         // Print sensor data and balance angle
         printf("----------------------------------------\n");
         printf("[IMU_THREAD] (X,Y,Z):(%.02f,%.02f,%.02f)(m/s^2), (XG,YG,ZG):(%.02f,%.02f,%.02f)(°/s)\n", data.ax, data.ay, data.az, data.gx, data.gy, data.gz);
@@ -228,6 +262,15 @@ void *_imu_thread(void *arg)
         } else if (state == Moving) {
             msg.type = LED_MSG_TYPE_GREEN;
             printf("[IMU_THREAD] State: Moving\n");
+        } else if (state == MovingX) {
+            msg.type = LED_MSG_TYPE_YELLOW;
+            printf("[IMU_THREAD] State: MovingX\n");
+        } else if (state == MovingY) {
+            msg.type = LED_MSG_TYPE_PURPLE;
+            printf("[IMU_THREAD] State: MovingY\n");
+        } else if (state == MovingZ) {
+            msg.type = LED_MSG_TYPE_CYAN;
+            printf("[IMU_THREAD] State: MovingZ\n");
         } else {
             msg.type = LED_MSG_TYPE_NONE;
             printf("[IMU_THREAD] State: Unknown\n");
