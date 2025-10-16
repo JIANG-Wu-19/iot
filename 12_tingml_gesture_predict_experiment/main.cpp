@@ -17,6 +17,14 @@ using namespace std;
 static char stack_for_motion_thread[THREAD_STACKSIZE];
 static char stack_for_led_thread[THREAD_STACKSIZE];
 static kernel_pid_t _led_pid;
+#define LED_MSG_TYPE_ISR     (0x3456)
+#define LED_MSG_TYPE_NONE    (0x3110)
+#define LED_MSG_TYPE_RED     (0x3111)
+#define LED_MSG_TYPE_GREEN   (0x3112)
+#define LED_MSG_TYPE_BLUE    (0x3113)
+#define LED_MSG_TYPE_YELLOW  (0x3114)
+#define LED_MSG_TYPE_PURPLE  (0x3115)
+#define LED_MSG_TYPE_CYAN    (0x3116)
 #define LED_GPIO_R GPIO26
 #define LED_GPIO_G GPIO25
 #define LED_GPIO_B GPIO27
@@ -27,6 +35,7 @@ struct MPU6050Data
     float ax, ay, az; // acceler_x_axis, acceler_y_axis, acceler_z_axis
     float gx, gy, gz; // gyroscope_x_axis, gyroscope_y_axis, gyroscope_z_axis
 };
+enum MoveState{Stationary, Tilted, Rotating, Moving};
 void delay_ms(uint32_t sleep_ms)
 {
     ztimer_sleep(ZTIMER_USEC, sleep_ms * US_PER_MS);
@@ -47,7 +56,58 @@ void *_led_thread(void *arg)
         // Input your codes
         // Wait for a message to control the LED
         // Display different light colors based on the motion state of the device.
-        delay_ms(10);    
+
+        printf("[LED_THREAD] WAIT\n");
+        msg_t msg;
+        // Wait for the message from OTHER thread
+        msg_receive(&msg);
+        if (msg.type == LED_MSG_TYPE_NONE)
+        {
+            // TURN OFF LIGHT
+            led.change_led_color(0);
+            printf("[LED_THREAD]: LED TURN OFF!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_RED)
+        {
+            // TURN ON RED LIGHT
+            led.change_led_color(1);
+            printf("[LED_THREAD]: LED RED!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_GREEN)
+        {
+            // TURN ON GREEN LIGHT
+            led.change_led_color(2);
+            printf("[LED_THREAD]: LED GREEN!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_BLUE)
+        {
+            // TURN ON BLUE LIGHT
+            led.change_led_color(4);
+            printf("[LED_THREAD]: LED BLUE!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_YELLOW)
+        {
+            // TURN ON YELLOW LIGHT
+            led.change_led_color(3);
+            printf("[LED_THREAD]: LED YELLOW!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_PURPLE)
+        {
+            // TURN ON PURPLE LIGHT
+            led.change_led_color(5);
+            printf("[LED_THREAD]: LED PURPLE!!\n");
+        }
+        else if (msg.type == LED_MSG_TYPE_CYAN)
+        {
+            // TURN ON CYAN LIGHT
+            led.change_led_color(6);
+            printf("[LED_THREAD]: LED CYAN!!\n");
+        }
+        else
+        {
+            // UNKNOWN MESSAGE
+            printf("[LED_THREAD]: UNKNOWN MESSAGE!!\n");
+        }
     }
     return NULL;
 }
@@ -128,7 +188,29 @@ void *_motion_thread(void *arg)
         // tell the led thread to do some operations
         // input your code
         // Print result
-        printf("Predict: %d, %s\n", ret, motions[ret].c_str());
+        msg_t msg;
+        if (ret == 0) {
+            printf("[IMU_THREAD] Predict result: %s\n", motions[0].c_str());
+            msg.type = LED_MSG_TYPE_NONE;
+        }
+        else if (ret == 1) {
+            printf("[IMU_THREAD] Predict result: %s\n", motions[1].c_str());
+            msg.type = LED_MSG_TYPE_RED;
+        }
+        else if (ret == 2) {
+            printf("[IMU_THREAD] Predict result: %s\n", motions[2].c_str());
+            msg.type = LED_MSG_TYPE_BLUE;
+        }
+        else if (ret == 3) {
+            printf("[IMU_THREAD] Predict result: %s\n", motions[3].c_str());
+            msg.type = LED_MSG_TYPE_GREEN;
+        }
+        else {
+            printf("[IMU_THREAD] Predict result: Unknown\n");
+            msg.type = LED_MSG_TYPE_NONE;
+        }
+        // Send message to LED thread
+        msg_send(&msg,_led_pid);
     }
     return NULL;
 }

@@ -236,12 +236,12 @@ void *_imu_thread(void *arg)
         delay_ms(100);    
         MPU6050Data data;
         // Convert raw sensor data to real values
-        data.ax = (ax - 1015.21) / accel_fs_convert;
-        data.ay = (ay + 514.53) / accel_fs_convert;
+        data.ax = (ax - 1028.68) / accel_fs_convert;
+        data.ay = (ay + 605.5) / accel_fs_convert;
         data.az = az / accel_fs_convert;
         data.gx = (gx + 95.99) / gyro_fs_convert;
-        data.gy = (gy - 14.77) / gyro_fs_convert;
-        data.gz = (gz - 35.53) / gyro_fs_convert;
+        data.gy = (gy - 15.42) / gyro_fs_convert;
+        data.gz = (gz - 36.23) / gyro_fs_convert;
         // Print sensor data and balance angle
         printf("----------------------------------------\n");
         printf("[IMU_THREAD] (X,Y,Z):(%.02f,%.02f,%.02f)(m/s^2), (XG,YG,ZG):(%.02f,%.02f,%.02f)(°/s)\n", data.ax, data.ay, data.az, data.gx, data.gy, data.gz);

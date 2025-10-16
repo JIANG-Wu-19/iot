@@ -9,7 +9,7 @@ import numpy as np  # 用于数值计算和数组处理
 from datetime import datetime  # 用于获取当前日期和时间
 
 # 最大记录数
-MAX_NUM = 200
+MAX_NUM = 500
 
 
 class SerialControl:

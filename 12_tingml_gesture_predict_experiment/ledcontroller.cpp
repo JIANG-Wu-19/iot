@@ -10,6 +10,19 @@
 LEDController::LEDController(uint8_t gpio_r, uint8_t gpio_g, uint8_t gpio_b){  
     printf("LED Controller initialized with (RGB: GPIO%d, GPIO%d, GPIO%d)\n", gpio_r, gpio_g, gpio_b);
     // input your code
+    led_gpio[0] = gpio_r;
+    led_gpio[1] = gpio_g;
+    led_gpio[2] = gpio_b;
+    gpio_init(led_gpio[0], GPIO_OUT);
+    gpio_init(led_gpio[1], GPIO_OUT);
+    gpio_init(led_gpio[2], GPIO_OUT);
+    rgb[0] = 0;
+    rgb[1] = 0;
+    rgb[2] = 0;
+    // turn off led
+    gpio_clear(led_gpio[0]);
+    gpio_clear(led_gpio[1]);
+    gpio_clear(led_gpio[2]);
 }  
 
 /**
@@ -28,5 +41,39 @@ LEDController::LEDController(uint8_t gpio_r, uint8_t gpio_g, uint8_t gpio_b){
  */
 void LEDController::change_led_color(uint8_t color){  
     // input your code
+
+    if (color == COLOR_NONE) {
+        gpio_clear(led_gpio[0]);
+        gpio_clear(led_gpio[1]);
+        gpio_clear(led_gpio[2]);
+    } else if (color == COLOR_RED) {
+        gpio_set(led_gpio[0]);
+        gpio_clear(led_gpio[1]);
+        gpio_clear(led_gpio[2]);
+    } else if (color == COLOR_GREEN) {
+        gpio_clear(led_gpio[0]);
+        gpio_set(led_gpio[1]);
+        gpio_clear(led_gpio[2]);
+    } else if (color == COLOR_YELLO) {
+        gpio_set(led_gpio[0]);
+        gpio_set(led_gpio[1]);
+        gpio_clear(led_gpio[2]);
+    } else if (color == COLOR_BLUE) {
+        gpio_clear(led_gpio[0]);
+        gpio_clear(led_gpio[1]);
+        gpio_set(led_gpio[2]);
+    } else if (color == COLOR_MAGENTA) {
+        gpio_set(led_gpio[0]);
+        gpio_clear(led_gpio[1]);
+        gpio_set(led_gpio[2]);
+    } else if (color == COLOR_CYAN) {
+        gpio_clear(led_gpio[0]);
+        gpio_set(led_gpio[1]);
+        gpio_set(led_gpio[2]);
+    } else if (color == COLOR_WHITE) {
+        gpio_set(led_gpio[0]);
+        gpio_set(led_gpio[1]);
+        gpio_set(led_gpio[2]);
+    }
 }
 
