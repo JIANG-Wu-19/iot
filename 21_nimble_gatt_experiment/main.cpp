@@ -51,6 +51,7 @@ extern "C" {
     #include "host/ble_gatt.h"
     #include "services/gap/ble_svc_gap.h"
     #include "services/gatt/ble_svc_gatt.h"
+    #include "os/os_mbuf.h"
 }
 #include "ledcontroller.hh"
 #include "mpu6050.h"
@@ -67,16 +68,23 @@ int predict(float *imu_data, int data_len, float threashold, int class_num);
 #define THREAD_STACKSIZE        (THREAD_STACKSIZE_IDLE)
 #define LED_MSG_TYPE_RED     (0x3111)
 #define LED_MSG_TYPE_NONE    (0x3110)
+#define LED_MSG_TYPE_MOTION  (0x3112)
 static char stack_for_led_thread[THREAD_STACKSIZE];
 static char stack_for_motion_thread[THREAD_STACKSIZE];
 
 #define DEMO_BUFFER_SIZE 100
-// static char rm_demo_write_data[DEMO_BUFFER_SIZE] = "This characteristic is read- and writeable!";
 #define STR_ANSWER_BUFFER_SIZE 100
-// static char str_answer[STR_ANSWER_BUFFER_SIZE];
+static char rm_demo_write_data[DEMO_BUFFER_SIZE] = "This characteristic is read- and writeable!";
+static char str_answer[STR_ANSWER_BUFFER_SIZE];
 
 static kernel_pid_t _led_pid;
 static kernel_pid_t _motion_pid;
+// 全局变量用于存储运动状态和阈值
+static int current_motion_state = 0;
+static float threshold = 0.7;
+static int collect_interval_ms = 20;
+static int predict_interval_ms = 500;
+
 struct MPU6050Data
 {
     float ax, ay, az; // acceler_x_axis, acceler_y_axis, acceler_z_axis
@@ -87,18 +95,39 @@ void delay_ms(uint32_t sleep_ms)
     ztimer_sleep(ZTIMER_USEC, sleep_ms * US_PER_MS);
     return;
 }
-// static int r_led_state = 0;
+
 void *_led_thread(void *arg)
 {
     (void) arg;
     LEDController led(LED_GPIO_R, LED_GPIO_G, LED_GPIO_B);
-    led.change_led_color(0);
+    led.change_led_color(0); // 默认关闭
     while(1){
-        // Input your codes
         // Wait for a message to control the LED
         // Display different light colors based on the motion state of the device.
         msg_t msg;
         msg_receive(&msg);
+        
+        if (msg.type == LED_MSG_TYPE_MOTION) {
+            // 根据运动状态显示不同颜色
+            int motion_state = (int)msg.content.value;
+            switch (motion_state) {
+                case 0: // Stationary
+                    led.change_led_color(0); // 关闭
+                    break;
+                case 1: // Tilted
+                    led.change_led_color(1); // 红色
+                    break;
+                case 2: // Rotating
+                    led.change_led_color(4); // 绿色
+                    break;
+                case 3: // Moving
+                    led.change_led_color(2); // 蓝色
+                    break;
+                default:
+                    led.change_led_color(0); // 关闭
+                    break;
+            }
+        }
         delay_ms(10);    
     }
     return NULL;
@@ -106,8 +135,6 @@ void *_led_thread(void *arg)
 
 float gyro_fs_convert = 1.0;
 float accel_fs_convert;
-static int collect_interval_ms = 20;
-static int predict_interval_ms = 500;
 
 void get_imu_data(MPU6050 mpu, float *imu_data){
     int16_t ax, ay, az, gx, gy, gz;
@@ -124,6 +151,7 @@ void get_imu_data(MPU6050 mpu, float *imu_data){
         imu_data[i*6 + 5] = gz / gyro_fs_convert;
     }
 } 
+
 void *_motion_thread(void *arg)
 {
     (void) arg;
@@ -170,30 +198,46 @@ void *_motion_thread(void *arg)
     // Main loop
     int ret = 0;
     string motions[class_num] = {"Stationary", "Tilted", "Rotating", "Moving"};
-    float threshold = 0.7;
     while (1) {
         delay_ms(predict_interval_ms);    
         // Read sensor data
         get_imu_data(mpu, imu_data);
         ret = predict(imu_data, data_len, threshold, class_num);
-        // tell the led thread to do some operations
-        // input your code
+        // 保存运动状态供GATT服务器使用
+        current_motion_state = ret;
+        // 发送消息给LED线程
+        msg_t msg;
+        msg.type = LED_MSG_TYPE_MOTION;
+        msg.content.value = ret;
+        msg_send(&msg, _led_pid);
         // Print result
-        // save motion for gatt server
         printf("Predict: %d, %s\n", ret, motions[ret].c_str());
     }
     return NULL;
 }
 
 
-// input your code, 自定义想要的UUID
+// 自定义想要的UUID
 /* UUID = 1bce38b3-d137-48ff-a13e-033e14c7a335 */
 static const ble_uuid128_t gatt_svr_svc_rw_demo_uuid
         = {{128}, {0x15, 0xa3, 0xc7, 0x14, 0x3e, 0x03, 0x3e, 0xa1, 0xff,
                 0x48, 0x37, 0xd1, 0xb3, 0x38, 0xce, 0x1b}};
+/* UUID = 35f28386-3070-4f3b-ba38-27507e991762 */
 static const ble_uuid128_t gatt_svr_chr_rw_demo_write_uuid
         = {{128}, {0x62, 0x17, 0x99, 0x7e, 0x50, 0x27, 0x38, 0xba, 0x3b,
                 0x4f, 0x70, 0x30, 0x86, 0x83, 0xf2, 0x35}};
+/* UUID = 16151413-1211-1009-0807-060504030201 */
+static const ble_uuid128_t gatt_svr_chr_rw_demo_readonly_uuid
+        = {{128}, {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
+/* UUID = 16151413-1211-1009-0807-060504030202 */
+static const ble_uuid128_t gatt_svr_chr_threshold_uuid
+        = {{128}, {0x02, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
+/* UUID = 16151413-1211-1009-0807-060504030203 */
+static const ble_uuid128_t gatt_svr_chr_interval_uuid
+        = {{128}, {0x03, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
 
 static int gatt_svr_chr_access_rw_demo(
         uint16_t conn_handle, uint16_t attr_handle,
@@ -205,7 +249,6 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
      * access_cb defines a callback for read and write access events on
      * given characteristics
      */
-    // input your code, 请按需求更改。
     {
         /* Service: Read/Write Demo */
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -215,7 +258,21 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
             .uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_write_uuid.u,
             .access_cb = gatt_svr_chr_access_rw_demo,
             .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
-            // .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP,
+        }, {
+            /* Characteristic: Read/Write Demo read only */
+            .uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_readonly_uuid.u,
+            .access_cb = gatt_svr_chr_access_rw_demo,
+            .flags = BLE_GATT_CHR_F_READ,
+        }, {
+            /* Characteristic: Threshold */
+            .uuid = (ble_uuid_t*) &gatt_svr_chr_threshold_uuid.u,
+            .access_cb = gatt_svr_chr_access_rw_demo,
+            .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+        }, {
+            /* Characteristic: Interval */
+            .uuid = (ble_uuid_t*) &gatt_svr_chr_interval_uuid.u,
+            .access_cb = gatt_svr_chr_access_rw_demo,
+            .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
         }, {
             0, /* No more characteristics in this service */
         }, }
@@ -232,9 +289,94 @@ static int gatt_svr_chr_access_rw_demo(
     (void) conn_handle;
     (void) attr_handle;
     (void) arg;
-    // input your code
-
-    (void) ctxt;
+    int rc = 0;
+    
+    // 获取各个特性的UUID
+    ble_uuid_t* write_uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_write_uuid.u;
+    ble_uuid_t* readonly_uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_readonly_uuid.u;
+    ble_uuid_t* threshold_uuid = (ble_uuid_t*) &gatt_svr_chr_threshold_uuid.u;
+    ble_uuid_t* interval_uuid = (ble_uuid_t*) &gatt_svr_chr_interval_uuid.u;
+    
+    // 判断是哪个特性被访问
+    if (ble_uuid_cmp(ctxt->chr->uuid, write_uuid) == 0) {
+        // 处理第一个可读写特性
+        switch (ctxt->op) {
+            case BLE_GATT_ACCESS_OP_READ_CHR:
+                /* send given data to the client */
+                rc = os_mbuf_append(ctxt->om, &rm_demo_write_data,
+                                    strlen(rm_demo_write_data));
+                return rc;
+            case BLE_GATT_ACCESS_OP_WRITE_CHR:
+                uint16_t om_len;
+                om_len = OS_MBUF_PKTLEN(ctxt->om);
+                /* read sent data */
+                rc = ble_hs_mbuf_to_flat(ctxt->om, &rm_demo_write_data,
+                                         sizeof(rm_demo_write_data), &om_len);
+                /* we need to null-terminate the received string */
+                rm_demo_write_data[om_len] = '\0';
+                return rc;
+            default:
+                return 1;
+        }
+    }
+    else if (ble_uuid_cmp(ctxt->chr->uuid, readonly_uuid) == 0) {
+        // 处理只读特性 - 返回当前运动状态
+        if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+            string motions[class_num] = {"Stationary", "Tilted", "Rotating", "Moving"};
+            snprintf(str_answer, STR_ANSWER_BUFFER_SIZE, "Motion State: %d (%s)", 
+                     current_motion_state, motions[current_motion_state].c_str());
+            rc = os_mbuf_append(ctxt->om, &str_answer, strlen(str_answer));
+            return rc;
+        }
+        return 0;
+    }
+    else if (ble_uuid_cmp(ctxt->chr->uuid, threshold_uuid) == 0) {
+        // 处理阈值特性
+        switch (ctxt->op) {
+            case BLE_GATT_ACCESS_OP_READ_CHR:
+                // 读取阈值
+                snprintf(str_answer, STR_ANSWER_BUFFER_SIZE, "Threshold: %.2f", threshold);
+                rc = os_mbuf_append(ctxt->om, &str_answer, strlen(str_answer));
+                return rc;
+            case BLE_GATT_ACCESS_OP_WRITE_CHR:
+                // 设置阈值
+                uint16_t om_len;
+                om_len = OS_MBUF_PKTLEN(ctxt->om);
+                if (om_len >= sizeof(float)) {
+                    rc = ble_hs_mbuf_to_flat(ctxt->om, &threshold,
+                                             sizeof(threshold), &om_len);
+                }
+                return rc;
+            default:
+                return 1;
+        }
+    }
+    else if (ble_uuid_cmp(ctxt->chr->uuid, interval_uuid) == 0) {
+        // 处理间隔特性
+        switch (ctxt->op) {
+            case BLE_GATT_ACCESS_OP_READ_CHR:
+                // 读取间隔
+                snprintf(str_answer, STR_ANSWER_BUFFER_SIZE, "Interval: %d ms", predict_interval_ms);
+                rc = os_mbuf_append(ctxt->om, &str_answer, strlen(str_answer));
+                return rc;
+            case BLE_GATT_ACCESS_OP_WRITE_CHR:
+                // 设置间隔
+                uint16_t om_len;
+                om_len = OS_MBUF_PKTLEN(ctxt->om);
+                if (om_len >= sizeof(int)) {
+                    int new_interval;
+                    rc = ble_hs_mbuf_to_flat(ctxt->om, &new_interval,
+                                             sizeof(new_interval), &om_len);
+                    if (rc == 0) {
+                        predict_interval_ms = new_interval;
+                    }
+                }
+                return rc;
+            default:
+                return 1;
+        }
+    }
+    
     return 1;
 }
 
@@ -280,7 +422,7 @@ int main(int argc, char* argv[])
     assert(rc == 0);
 
     /* set the device name */
-    ble_svc_gap_device_name_set(CONFIG_NIMBLE_AUTOADV_DEVICE_NAME);
+    ble_svc_gap_device_name_set("IOT-EXPERIMENT");
     /* reload the GATT server to link our added services */
     ble_gatts_start();
 
