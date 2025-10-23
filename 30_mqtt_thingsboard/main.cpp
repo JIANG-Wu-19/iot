@@ -46,7 +46,7 @@ string DEFAULT_MQTT_CLIENT_ID = "esp32_test";
 string DEFAULT_MQTT_USER = "esp32";
 string DEFAULT_MQTT_PWD = "esp32";
 // Please enter the IP of the computer on which you have ThingsBoard installed.
-string DEFAULT_IPV4 = "192.168.31.229";
+string DEFAULT_IPV4 = "192.168.24.35";
 string DEFAULT_TOPIC = "v1/devices/me/telemetry";
 
 

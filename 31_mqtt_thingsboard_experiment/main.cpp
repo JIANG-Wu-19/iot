@@ -127,42 +127,154 @@ void *_led_thread(void *arg)
 {
     (void) arg;
     LEDController led(LED_GPIO_R, LED_GPIO_G, LED_GPIO_B);
-    led.change_led_color(0);
+    led.change_led_color(0); // 默认关闭
     while(1){
-        // Input your codes
         // Wait for a message to control the LED
         // Display different light colors based on the motion state of the device.
         msg_t msg;
         msg_receive(&msg);
+        
+        if (msg.type == LED_MSG_TYPE_MOTION) {
+            // 根据运动状态显示不同颜色
+            int motion_state = (int)msg.content.value;
+            switch (motion_state) {
+                case 0: // Stationary
+                    led.change_led_color(0); // 关闭
+                    break;
+                case 1: // Tilted
+                    led.change_led_color(1); // 红色
+                    break;
+                case 2: // Rotating
+                    led.change_led_color(4); // 绿色
+                    break;
+                case 3: // Moving
+                    led.change_led_color(2); // 蓝色
+                    break;
+                default:
+                    led.change_led_color(0); // 关闭
+                    break;
+            }
+        }
         delay_ms(10);    
     }
     return NULL;
 }
+
+float gyro_fs_convert = 1.0;
+float accel_fs_convert;
+
+void get_imu_data(MPU6050 mpu, float *imu_data){
+    int16_t ax, ay, az, gx, gy, gz;
+    for(int i = 0; i < SAMPLES_PER_GESTURE; ++i)
+    {
+        /* code */
+        delay_ms(collect_interval_ms);
+        mpu.getMotion6(&ax, &ay, &az, &gx, &gy, &gz);
+        imu_data[i*6 + 0] = ax / accel_fs_convert;
+        imu_data[i*6 + 1] = ay / accel_fs_convert;
+        imu_data[i*6 + 2] = az / accel_fs_convert;
+        imu_data[i*6 + 3] = gx / gyro_fs_convert;
+        imu_data[i*6 + 4] = gy / gyro_fs_convert;
+        imu_data[i*6 + 5] = gz / gyro_fs_convert;
+    }
+} 
+
 void *_motion_thread(void *arg)
 {
     (void) arg;
-    // input your code
+    // Initialize MPU6050 sensor
+    MPU6050 mpu;
+    // get mpu6050 device id
+    uint8_t device_id = mpu.getDeviceID();
+    printf("[IMU_THREAD] DEVICE_ID:0x%x\n", device_id);
+    mpu.initialize();
+    // Configure gyroscope and accelerometer full scale ranges
+    uint8_t gyro_fs = mpu.getFullScaleGyroRange();
+    uint8_t accel_fs_g = mpu.getFullScaleAccelRange();
+    uint16_t accel_fs_real = 1;
+
+    // Convert gyroscope full scale range to conversion factor
+    if (gyro_fs == MPU6050_GYRO_FS_250)
+        gyro_fs_convert = 131.0;
+    else if (gyro_fs == MPU6050_GYRO_FS_500)
+        gyro_fs_convert = 65.5;
+    else if (gyro_fs == MPU6050_GYRO_FS_1000)
+        gyro_fs_convert = 32.8;
+    else if (gyro_fs == MPU6050_GYRO_FS_2000)
+        gyro_fs_convert = 16.4;
+    else
+        printf("[IMU_THREAD] Unknown GYRO_FS: 0x%x\n", gyro_fs);
+
+    // Convert accelerometer full scale range to real value
+    if (accel_fs_g == MPU6050_ACCEL_FS_2)
+        accel_fs_real = g_acc * 2;
+    else if (accel_fs_g == MPU6050_ACCEL_FS_4)
+        accel_fs_real = g_acc * 4;
+    else if (accel_fs_g == MPU6050_ACCEL_FS_8)
+        accel_fs_real = g_acc * 8;
+    else if (accel_fs_g == MPU6050_ACCEL_FS_16)
+        accel_fs_real = g_acc * 16;
+    else
+        printf("[IMU_THREAD] Unknown ACCEL_FS: 0x%x\n", accel_fs_g);
+
+    // Calculate accelerometer conversion factor
+    accel_fs_convert = 32768.0 / accel_fs_real;
+    float imu_data[SAMPLES_PER_GESTURE * 6] = {0};
+    int data_len = SAMPLES_PER_GESTURE * 6;
+    delay_ms(200);
+    // Main loop
+    int ret = 0;
+    string motions[class_num] = {"Stationary", "Tilted", "Rotating", "Moving"};
+    while (1) {
+        delay_ms(predict_interval_ms);    
+        // Read sensor data
+        get_imu_data(mpu, imu_data);
+        ret = predict(imu_data, data_len, threshold, class_num);
+        // 保存运动状态供GATT服务器使用
+        current_motion_state = ret;
+        // 发送消息给LED线程
+        msg_t msg;
+        msg.type = LED_MSG_TYPE_MOTION;
+        msg.content.value = ret;
+        msg_send(&msg, _led_pid);
+        // Print result
+        printf("Predict: %d, %s\n", ret, motions[ret].c_str());
+    }
     return NULL;
 }
 
-// input your code, 自定义想要的UUID
+// 自定义想要的UUID
 /* UUID = 1bce38b3-d137-48ff-a13e-033e14c7a335 */
 static const ble_uuid128_t gatt_svr_svc_rw_demo_uuid
         = {{128}, {0x15, 0xa3, 0xc7, 0x14, 0x3e, 0x03, 0x3e, 0xa1, 0xff,
                 0x48, 0x37, 0xd1, 0xb3, 0x38, 0xce, 0x1b}};
+/* UUID = 35f28386-3070-4f3b-ba38-27507e991762 */
 static const ble_uuid128_t gatt_svr_chr_rw_demo_write_uuid
         = {{128}, {0x62, 0x17, 0x99, 0x7e, 0x50, 0x27, 0x38, 0xba, 0x3b,
                 0x4f, 0x70, 0x30, 0x86, 0x83, 0xf2, 0x35}};
+/* UUID = 16151413-1211-1009-0807-060504030201 */
+static const ble_uuid128_t gatt_svr_chr_rw_demo_readonly_uuid
+        = {{128}, {0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
+/* UUID = 16151413-1211-1009-0807-060504030202 */
+static const ble_uuid128_t gatt_svr_chr_threshold_uuid
+        = {{128}, {0x02, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
+/* UUID = 16151413-1211-1009-0807-060504030203 */
+static const ble_uuid128_t gatt_svr_chr_interval_uuid
+        = {{128}, {0x03, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
+
 static int gatt_svr_chr_access_rw_demo(
         uint16_t conn_handle, uint16_t attr_handle,
         struct ble_gatt_access_ctxt *ctxt, void *arg);
+
 /* define several bluetooth services for our device */
 static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
     /*
      * access_cb defines a callback for read and write access events on
      * given characteristics
      */
-    // input your code, 请按需求更改。
     {
         /* Service: Read/Write Demo */
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
@@ -172,7 +284,21 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
             .uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_write_uuid.u,
             .access_cb = gatt_svr_chr_access_rw_demo,
             .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
-            // .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE_NO_RSP,
+        }, {
+            /* Characteristic: Read/Write Demo read only */
+            .uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_readonly_uuid.u,
+            .access_cb = gatt_svr_chr_access_rw_demo,
+            .flags = BLE_GATT_CHR_F_READ,
+        }, {
+            /* Characteristic: Threshold */
+            .uuid = (ble_uuid_t*) &gatt_svr_chr_threshold_uuid.u,
+            .access_cb = gatt_svr_chr_access_rw_demo,
+            .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
+        }, {
+            /* Characteristic: Interval */
+            .uuid = (ble_uuid_t*) &gatt_svr_chr_interval_uuid.u,
+            .access_cb = gatt_svr_chr_access_rw_demo,
+            .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
         }, {
             0, /* No more characteristics in this service */
         }, }
@@ -181,6 +307,7 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
         0, /* No more services */
     },
 };
+
 static int gatt_svr_chr_access_rw_demo(
         uint16_t conn_handle, uint16_t attr_handle,
         struct ble_gatt_access_ctxt *ctxt, void *arg)
@@ -188,12 +315,95 @@ static int gatt_svr_chr_access_rw_demo(
     (void) conn_handle;
     (void) attr_handle;
     (void) arg;
-    int rc = 1;
-    // input your code
-
-
-    (void) ctxt;
-    return rc;
+    int rc = 0;
+    
+    // 获取各个特性的UUID
+    ble_uuid_t* write_uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_write_uuid.u;
+    ble_uuid_t* readonly_uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_readonly_uuid.u;
+    ble_uuid_t* threshold_uuid = (ble_uuid_t*) &gatt_svr_chr_threshold_uuid.u;
+    ble_uuid_t* interval_uuid = (ble_uuid_t*) &gatt_svr_chr_interval_uuid.u;
+    
+    // 判断是哪个特性被访问
+    if (ble_uuid_cmp(ctxt->chr->uuid, write_uuid) == 0) {
+        // 处理第一个可读写特性
+        switch (ctxt->op) {
+            case BLE_GATT_ACCESS_OP_READ_CHR:
+                /* send given data to the client */
+                rc = os_mbuf_append(ctxt->om, &rm_demo_write_data,
+                                    strlen(rm_demo_write_data));
+                return rc;
+            case BLE_GATT_ACCESS_OP_WRITE_CHR:
+                uint16_t om_len;
+                om_len = OS_MBUF_PKTLEN(ctxt->om);
+                /* read sent data */
+                rc = ble_hs_mbuf_to_flat(ctxt->om, &rm_demo_write_data,
+                                         sizeof(rm_demo_write_data), &om_len);
+                /* we need to null-terminate the received string */
+                rm_demo_write_data[om_len] = '\0';
+                return rc;
+            default:
+                return 1;
+        }
+    }
+    else if (ble_uuid_cmp(ctxt->chr->uuid, readonly_uuid) == 0) {
+        // 处理只读特性 - 返回当前运动状态
+        if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
+            string motions[class_num] = {"Stationary", "Tilted", "Rotating", "Moving"};
+            snprintf(str_answer, STR_ANSWER_BUFFER_SIZE, "Motion State: %d (%s)", 
+                     current_motion_state, motions[current_motion_state].c_str());
+            rc = os_mbuf_append(ctxt->om, &str_answer, strlen(str_answer));
+            return rc;
+        }
+        return 0;
+    }
+    else if (ble_uuid_cmp(ctxt->chr->uuid, threshold_uuid) == 0) {
+        // 处理阈值特性
+        switch (ctxt->op) {
+            case BLE_GATT_ACCESS_OP_READ_CHR:
+                // 读取阈值
+                snprintf(str_answer, STR_ANSWER_BUFFER_SIZE, "Threshold: %.2f", threshold);
+                rc = os_mbuf_append(ctxt->om, &str_answer, strlen(str_answer));
+                return rc;
+            case BLE_GATT_ACCESS_OP_WRITE_CHR:
+                // 设置阈值
+                uint16_t om_len;
+                om_len = OS_MBUF_PKTLEN(ctxt->om);
+                if (om_len >= sizeof(float)) {
+                    rc = ble_hs_mbuf_to_flat(ctxt->om, &threshold,
+                                             sizeof(threshold), &om_len);
+                }
+                return rc;
+            default:
+                return 1;
+        }
+    }
+    else if (ble_uuid_cmp(ctxt->chr->uuid, interval_uuid) == 0) {
+        // 处理间隔特性
+        switch (ctxt->op) {
+            case BLE_GATT_ACCESS_OP_READ_CHR:
+                // 读取间隔
+                snprintf(str_answer, STR_ANSWER_BUFFER_SIZE, "Interval: %d ms", predict_interval_ms);
+                rc = os_mbuf_append(ctxt->om, &str_answer, strlen(str_answer));
+                return rc;
+            case BLE_GATT_ACCESS_OP_WRITE_CHR:
+                // 设置间隔
+                uint16_t om_len;
+                om_len = OS_MBUF_PKTLEN(ctxt->om);
+                if (om_len >= sizeof(int)) {
+                    int new_interval;
+                    rc = ble_hs_mbuf_to_flat(ctxt->om, &new_interval,
+                                             sizeof(new_interval), &om_len);
+                    if (rc == 0) {
+                        predict_interval_ms = new_interval;
+                    }
+                }
+                return rc;
+            default:
+                return 1;
+        }
+    }
+    
+    return 1;
 }
 
 int mqtt_disconnect(void)

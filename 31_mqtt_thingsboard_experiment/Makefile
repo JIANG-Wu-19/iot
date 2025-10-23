@@ -28,8 +28,8 @@ DEVELHELP ?= 1
 # Change this to 0 show compiler invocation lines by default:
 QUIET ?= 1
 
-WIFI_SSID ?= "EmNets-301"
-WIFI_PASS ?= "eagle402"
+WIFI_SSID ?= "JIANG"
+WIFI_PASS ?= "8210212526"
 # DEVICE NAME 也可自定义
 CFLAGS += -DCONFIG_NIMBLE_AUTOADV_DEVICE_NAME='"NimBLE GATT Example"'
 CFLAGS += -DCONFIG_NIMBLE_AUTOADV_START_MANUALLY=1
