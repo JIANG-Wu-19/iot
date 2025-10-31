@@ -65,9 +65,25 @@ string DEFAULT_MQTT_CLIENT_ID = "esp32_test";
 string DEFAULT_MQTT_USER = "esp32";
 string DEFAULT_MQTT_PWD = "esp32";
 // Please enter the IP of the computer on which you have ThingsBoard installed.
-string DEFAULT_IPV4 = "192.168.31.229";
+string DEFAULT_IPV4 = "192.168.24.35";
 string DEFAULT_TOPIC = "v1/devices/me/telemetry";
 
+int red_led_state = 0;
+int green_led_state = 0;
+int blue_led_state = 0;
+int prediction_gesture = 0;
+
+float acceler_x_axis = 0.0;
+float acceler_y_axis = 0.0;
+float acceler_z_axis = 0.0;
+float gyroscope_x_axis = 0.0;
+float gyroscope_y_axis = 0.0;
+float gyroscope_z_axis = 0.0;
+
+static int current_motion_state = 0;
+static float threshold = 0.7;
+static int collect_interval_ms = 20;
+static int predict_interval_ms = 500;
 
 
 /**
@@ -99,6 +115,7 @@ static int topic_cnt = 0;
 #define LED_MSG_TYPE_ISR     (0x3456)
 #define LED_MSG_TYPE_RED     (0x3111)
 #define LED_MSG_TYPE_NONE    (0x3110)
+#define LED_MSG_TYPE_MOTION  (0x3112)
 #define LED_GPIO_R GPIO26
 #define LED_GPIO_G GPIO25
 #define LED_GPIO_B GPIO27
@@ -107,12 +124,18 @@ static int topic_cnt = 0;
 #define SAMPLES_PER_GESTURE (10)
 #define THREAD_STACKSIZE        (THREAD_STACKSIZE_IDLE)
 static char stack_for_led_thread[THREAD_STACKSIZE];
-static char stack_for_motion_thread[THREAD_STACKSIZE];
+static char stack_for_motion_thread[3072];
+
+#define DEMO_BUFFER_SIZE 100
+#define STR_ANSWER_BUFFER_SIZE 100
+static char rm_demo_write_data[DEMO_BUFFER_SIZE] = "This characteristic is read- and writeable!";
+static char str_answer[STR_ANSWER_BUFFER_SIZE];
+
 // the pid of led thread
 static kernel_pid_t _led_pid;
 // static kernel_pid_t _main_pid;
 static kernel_pid_t _motion_pid;
-int mqtt_interval_ms = 5000;
+int mqtt_interval_ms = 500;
 struct MPU6050Data
 {
     float ax, ay, az; // acceler_x_axis, acceler_y_axis, acceler_z_axis
@@ -140,18 +163,33 @@ void *_led_thread(void *arg)
             switch (motion_state) {
                 case 0: // Stationary
                     led.change_led_color(0); // 关闭
+                    red_led_state = 0;
+                    green_led_state = 0;
+                    blue_led_state = 0;
                     break;
                 case 1: // Tilted
                     led.change_led_color(1); // 红色
+                    red_led_state = 1;
+                    green_led_state = 0;
+                    blue_led_state = 0;
                     break;
                 case 2: // Rotating
-                    led.change_led_color(4); // 绿色
+                    led.change_led_color(4); // 蓝色
+                    red_led_state = 0;
+                    green_led_state = 0;
+                    blue_led_state = 1;
                     break;
                 case 3: // Moving
-                    led.change_led_color(2); // 蓝色
+                    led.change_led_color(2); // 绿色
+                    red_led_state = 0;
+                    green_led_state = 1;
+                    blue_led_state = 0;
                     break;
                 default:
                     led.change_led_color(0); // 关闭
+                    red_led_state = 0;
+                    green_led_state = 0;
+                    blue_led_state = 0;
                     break;
             }
         }
@@ -229,7 +267,16 @@ void *_motion_thread(void *arg)
         delay_ms(predict_interval_ms);    
         // Read sensor data
         get_imu_data(mpu, imu_data);
+
+        acceler_x_axis= imu_data[0];
+        acceler_y_axis= imu_data[1];
+        acceler_z_axis= imu_data[2];
+        gyroscope_x_axis= imu_data[3];
+        gyroscope_y_axis= imu_data[4];
+        gyroscope_z_axis= imu_data[5];
+
         ret = predict(imu_data, data_len, threshold, class_num);
+        prediction_gesture = ret;
         // 保存运动状态供GATT服务器使用
         current_motion_state = ret;
         // 发送消息给LED线程
@@ -263,6 +310,9 @@ static const ble_uuid128_t gatt_svr_chr_threshold_uuid
 /* UUID = 16151413-1211-1009-0807-060504030203 */
 static const ble_uuid128_t gatt_svr_chr_interval_uuid
         = {{128}, {0x03, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+                0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
+static const ble_uuid128_t gatt_svr_chr_mqtt_interval_uuid
+        = {{128}, {0x04, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
                 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16}};
 
 static int gatt_svr_chr_access_rw_demo(
@@ -300,6 +350,11 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
             .access_cb = gatt_svr_chr_access_rw_demo,
             .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE,
         }, {
+            .uuid = (ble_uuid_t*) &gatt_svr_chr_mqtt_interval_uuid.u,
+            .access_cb = gatt_svr_chr_access_rw_demo,
+            .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_WRITE
+        },
+        {
             0, /* No more characteristics in this service */
         }, }
     },
@@ -322,6 +377,7 @@ static int gatt_svr_chr_access_rw_demo(
     ble_uuid_t* readonly_uuid = (ble_uuid_t*) &gatt_svr_chr_rw_demo_readonly_uuid.u;
     ble_uuid_t* threshold_uuid = (ble_uuid_t*) &gatt_svr_chr_threshold_uuid.u;
     ble_uuid_t* interval_uuid = (ble_uuid_t*) &gatt_svr_chr_interval_uuid.u;
+    ble_uuid_t* mqtt_interval_uuid = (ble_uuid_t*) &gatt_svr_chr_mqtt_interval_uuid.u;
     
     // 判断是哪个特性被访问
     if (ble_uuid_cmp(ctxt->chr->uuid, write_uuid) == 0) {
@@ -401,6 +457,30 @@ static int gatt_svr_chr_access_rw_demo(
             default:
                 return 1;
         }
+    }else if (ble_uuid_cmp(ctxt->chr->uuid, mqtt_interval_uuid) == 0) {
+        // 处理MQTT间隔特性
+        switch (ctxt->op) {
+            case BLE_GATT_ACCESS_OP_READ_CHR:
+                // 读取MQTT间隔
+                snprintf(str_answer, STR_ANSWER_BUFFER_SIZE, "MQTT Interval: %d ms", mqtt_interval_ms);
+                rc = os_mbuf_append(ctxt->om, &str_answer, strlen(str_answer));
+                return rc;
+            case BLE_GATT_ACCESS_OP_WRITE_CHR:
+                // 设置MQTT间隔
+                uint16_t om_len;
+                om_len = OS_MBUF_PKTLEN(ctxt->om);
+                if (om_len >= sizeof(int)) {
+                    int new_mqtt_interval;
+                    rc = ble_hs_mbuf_to_flat(ctxt->om, &new_mqtt_interval,
+                                             sizeof(new_mqtt_interval), &om_len);
+                    if (rc == 0) {
+                        mqtt_interval_ms = new_mqtt_interval;
+                    }
+                }
+                return rc;
+            default:
+                return 1;
+        }
     }
     
     return 1;
@@ -457,8 +537,31 @@ int mqtt_connect(void)
 }
 int mqtt_pub(void)
 {
-    int rc = 0;
-    // input your code
+    enum QoS qos = QOS0;
+
+    MQTTMessage message;
+    message.qos = qos;
+    message.retained = IS_RETAINED_MSG;
+    char json[1000];  
+    // snprintf(json, 1000, "{r_led_state:%d}", led_state);
+    snprintf(json,500,"{r_led_state:%d, g_led_state:%d, b_led_state:%d, prediction_gesture:%d, acceler_x_axis:%.2f, acceler_y_axis:%.2f, acceler_z_axis:%.2f, gyroscope_x_axis:%.2f, gyroscope_y_axis:%.2f, gyroscope_z_axis:%.2f}", 
+             red_led_state, green_led_state, blue_led_state, prediction_gesture,
+             acceler_x_axis, acceler_y_axis, acceler_z_axis,
+             gyroscope_x_axis, gyroscope_y_axis, gyroscope_z_axis);
+    printf("[Send] Message:%s\n", json);
+    message.payload = json;
+    message.payloadlen = strlen((char *)message.payload);
+
+    int rc;
+    if ((rc = MQTTPublish(&client, DEFAULT_TOPIC.c_str(), &message)) < 0) {
+        printf("mqtt_example: Unable to publish (%d)\n", rc);
+    }
+    else {
+        printf("mqtt_example: Message (%s) has been published to topic %s"
+               "with QOS %d\n",
+               (char *)message.payload, DEFAULT_TOPIC.c_str(), (int)message.qos);
+    }
+
     return rc;
 }
 

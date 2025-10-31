@@ -35,7 +35,7 @@ namespace {
 
     // Create an area of memory to use for input, output, and intermediate arrays.
     // Finding the minimum value for your model may require some trial and error.
-    constexpr int kTensorArenaSize = 32 * 1024;
+    constexpr int kTensorArenaSize = 16 * 1024;
     uint8_t tensor_arena[kTensorArenaSize];
 }  // namespace
 
